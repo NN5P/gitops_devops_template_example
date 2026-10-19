@@ -1,6 +1,6 @@
 name: GitOps update image tag
 
-# Reusable: sets `.image.tag` in <app-name>/overwrite-<environment>.yaml in the
+# Reusable: sets `.image.tag` in apps/<app-name>/values-<environment>.yaml in the
 # GitOps repo and pushes. ArgoCD picks up the change and deploys.
 #   - deploy:  pass `image-tag`
 #   - promote: pass `promote-from` (e.g. dev) to copy that environment's tag
@@ -9,11 +9,11 @@ on:
   workflow_call:
     inputs:
       app-name:
-        description: App chart folder in the GitOps repo
+        description: App chart folder under apps/ in the GitOps repo
         type: string
         required: true
       environment:
-        description: Target environment (dev | production) -> overwrite-<environment>.yaml
+        description: Target environment (dev | prod) -> apps/<app-name>/values-<environment>.yaml
         type: string
         required: true
       image-tag:
@@ -21,7 +21,7 @@ on:
         type: string
         default: ""
       promote-from:
-        description: Copy the tag from overwrite-<promote-from>.yaml instead
+        description: Copy the tag from apps/<app-name>/values-<promote-from>.yaml instead
         type: string
         default: ""
       gitops-repo:
@@ -58,11 +58,11 @@ jobs:
           GITOPS_BRANCH: ${{ inputs.gitops-branch }}
         run: |
           set -euo pipefail
-          target="$APP/overwrite-$ENVIRONMENT.yaml"
+          target="apps/$APP/values-$ENVIRONMENT.yaml"
           [ -f "$target" ] || { echo "::error::$target not found in GitOps repo"; exit 1; }
 
           if [ -n "$PROMOTE_FROM" ]; then
-            IMAGE_TAG=$(yq '.image.tag' "$APP/overwrite-$PROMOTE_FROM.yaml")
+            IMAGE_TAG=$(yq '.image.tag' "apps/$APP/values-$PROMOTE_FROM.yaml")
           fi
           if [ -z "$IMAGE_TAG" ] || [ "$IMAGE_TAG" = null ]; then
             echo "::error::no image tag to set"; exit 1

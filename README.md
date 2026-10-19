@@ -9,7 +9,7 @@ Flow: app repo builds an image to ECR, then bumps the image tag in the GitOps re
 | Workflow | Does |
 |---|---|
 | `docker-build.yml` | Build the caller's Dockerfile, push `<registry>/<ecr-repository>:<sha>` to ECR |
-| `gitops-update.yml` | Set `.image.tag` in `<app-name>/overwrite-<environment>.yaml` in the GitOps repo, or copy it from another environment (`promote-from`) |
+| `gitops-update.yml` | Set `.image.tag` in `apps/<app-name>/values-<environment>.yaml` in the GitOps repo, or copy it from another environment (`promote-from`) |
 
 ## docker-build.yml
 
@@ -32,10 +32,10 @@ The job runs with the caller's permissions: grant `id-token: write` when using O
 
 | Input | Default | |
 |---|---|---|
-| `app-name` | required | Chart folder in the GitOps repo |
-| `environment` | required | `dev` / `production` -> `overwrite-<environment>.yaml` |
+| `app-name` | required | Chart folder under `apps/` in the GitOps repo |
+| `environment` | required | `dev` / `prod` -> `apps/<app-name>/values-<environment>.yaml` |
 | `image-tag` | `""` | Tag to set |
-| `promote-from` | `""` | Copy the tag from `overwrite-<promote-from>.yaml` instead |
+| `promote-from` | `""` | Copy the tag from `apps/<app-name>/values-<promote-from>.yaml` instead |
 | `gitops-repo` | `NN5P/gitops_argocd_example` | |
 | `gitops-branch` | `main` | |
 
@@ -45,7 +45,7 @@ if another app pushed at the same time.
 
 ## Using it in a new app repo
 
-Copy `.github/workflows/{build,prod,pr}.yml` from
+Copy `.github/workflows/{dev,prod,pr}.yml` from
 [NN5P/gitops_app_example](https://github.com/NN5P/gitops_app_example) and change `app-name`,
 `ecr-repository` and (if needed) `dockerfile`. Then set in the app repo:
 
