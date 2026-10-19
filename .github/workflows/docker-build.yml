@@ -29,6 +29,10 @@ on:
         description: Docker build context. Defaults to the Dockerfile's folder
         type: string
         default: ""
+      platforms:
+        description: Target platforms. Default builds amd64 (cloud nodes) and arm64 (Apple Silicon, Graviton)
+        type: string
+        default: linux/amd64,linux/arm64
       push:
         description: Push the image (false = build only, e.g. on pull requests)
         type: boolean
@@ -98,6 +102,9 @@ jobs:
           echo "tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
           echo "context=${CONTEXT:-$(dirname "$DOCKERFILE")}" >> "$GITHUB_OUTPUT"
 
+      # Emulates non-native platforms (arm64 on the x86 runner)
+      - uses: docker/setup-qemu-action@v3
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Build and push
@@ -106,6 +113,7 @@ jobs:
           context: ${{ steps.meta.outputs.context }}
           file: ${{ inputs.dockerfile }}
           push: ${{ inputs.push }}
+          platforms: ${{ inputs.platforms }}
           tags: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

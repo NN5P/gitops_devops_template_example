@@ -20,6 +20,7 @@ Flow: app repo builds an image to ECR, then bumps the image tag in the GitOps re
 | `aws-role-arn` | `""` | IAM role for GitHub OIDC. Empty = use the access key secrets |
 | `dockerfile` | `Dockerfile` | Path from the repo root, e.g. `api/Dockerfile` |
 | `context` | Dockerfile's folder | Build context |
+| `platforms` | `linux/amd64,linux/arm64` | Image architectures. arm64 is built under QEMU (slower) |
 | `push` | `true` | `false` = build only (pull requests, no AWS access) |
 
 Secrets (only without `aws-role-arn`): `aws-access-key-id`, `aws-secret-access-key`.
