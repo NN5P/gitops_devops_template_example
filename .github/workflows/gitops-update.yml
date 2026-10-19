@@ -1,0 +1,93 @@
+name: GitOps update image tag
+
+# Reusable: sets `.image.tag` in <app-name>/overwrite-<environment>.yaml in the
+# GitOps repo and pushes. ArgoCD picks up the change and deploys.
+#   - deploy:  pass `image-tag`
+#   - promote: pass `promote-from` (e.g. dev) to copy that environment's tag
+
+on:
+  workflow_call:
+    inputs:
+      app-name:
+        description: App chart folder in the GitOps repo
+        type: string
+        required: true
+      environment:
+        description: Target environment (dev | production) -> overwrite-<environment>.yaml
+        type: string
+        required: true
+      image-tag:
+        description: Tag to set. Ignored when promote-from is set
+        type: string
+        default: ""
+      promote-from:
+        description: Copy the tag from overwrite-<promote-from>.yaml instead
+        type: string
+        default: ""
+      gitops-repo:
+        type: string
+        default: NN5P/gitops_argocd_example
+      gitops-branch:
+        type: string
+        default: main
+    secrets:
+      gitops-token:
+        description: Token with contents:write on the GitOps repo
+        required: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: gitops-${{ inputs.app-name }}-${{ inputs.environment }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout GitOps repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.gitops-repo }}
+          ref: ${{ inputs.gitops-branch }}
+          token: ${{ secrets.gitops-token }}
+
+      - name: Update image tag and push
+        env:
+          APP: ${{ inputs.app-name }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+          PROMOTE_FROM: ${{ inputs.promote-from }}
+          GITOPS_BRANCH: ${{ inputs.gitops-branch }}
+        run: |
+          set -euo pipefail
+          target="$APP/overwrite-$ENVIRONMENT.yaml"
+          [ -f "$target" ] || { echo "::error::$target not found in GitOps repo"; exit 1; }
+
+          if [ -n "$PROMOTE_FROM" ]; then
+            IMAGE_TAG=$(yq '.image.tag' "$APP/overwrite-$PROMOTE_FROM.yaml")
+          fi
+          if [ -z "$IMAGE_TAG" ] || [ "$IMAGE_TAG" = null ]; then
+            echo "::error::no image tag to set"; exit 1
+          fi
+
+          # yq -i drops blank lines; rewrite only the image.tag line to keep formatting
+          line=$(yq '.image.tag | line' "$target")
+          if [ "$line" -gt 0 ]; then
+            sed -i "${line}s|tag:.*|tag: \"${IMAGE_TAG}\"|" "$target"
+          else
+            export IMAGE_TAG
+            yq -i '.image.tag = strenv(IMAGE_TAG)' "$target"
+          fi
+          if git diff --quiet; then
+            echo "$target already at $IMAGE_TAG, nothing to do"; exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "$APP($ENVIRONMENT): $IMAGE_TAG from $GITHUB_REPOSITORY@${GITHUB_SHA::7}"
+
+          # Other app repos may push at the same time: rebase and retry
+          for i in 1 2 3 4 5; do
+            git push origin "HEAD:$GITOPS_BRANCH" && exit 0
+            sleep $((i * 2))
+            git pull --rebase origin "$GITOPS_BRANCH"
+          done
+          echo "::error::push failed after retries"; exit 1

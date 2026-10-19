@@ -1,0 +1,111 @@
+name: Docker build
+
+# Reusable: builds the caller repo's Dockerfile and pushes it to Amazon ECR.
+# AWS auth (only when push: true), pick one:
+#   - OIDC (recommended): pass `aws-role-arn`; caller job must grant `id-token: write`
+#   - Access keys: pass secrets `aws-access-key-id` / `aws-secret-access-key`
+# With push: false (pull requests) it only builds; no AWS access is needed.
+
+on:
+  workflow_call:
+    inputs:
+      ecr-repository:
+        description: ECR repository name (e.g. gitops-app-example)
+        type: string
+        required: true
+      aws-region:
+        description: AWS region of the ECR registry. Required when push is true
+        type: string
+        default: ""
+      aws-role-arn:
+        description: IAM role to assume via OIDC. Leave empty to use access keys
+        type: string
+        default: ""
+      dockerfile:
+        description: Path to the Dockerfile, relative to the repo root
+        type: string
+        default: Dockerfile
+      context:
+        description: Docker build context. Defaults to the Dockerfile's folder
+        type: string
+        default: ""
+      push:
+        description: Push the image (false = build only, e.g. on pull requests)
+        type: boolean
+        default: true
+    secrets:
+      aws-access-key-id:
+        required: false
+      aws-secret-access-key:
+        required: false
+    outputs:
+      image:
+        description: Full image name without tag
+        value: ${{ jobs.build.outputs.image }}
+      tag:
+        description: Image tag (commit SHA)
+        value: ${{ jobs.build.outputs.tag }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check inputs
+        env:
+          DOCKERFILE: ${{ inputs.dockerfile }}
+          PUSH: ${{ inputs.push }}
+          AWS_REGION: ${{ inputs.aws-region }}
+        run: |
+          [ -f "$DOCKERFILE" ] || { echo "::error::Dockerfile not found: $DOCKERFILE"; exit 1; }
+          if [ "$PUSH" = true ] && [ -z "$AWS_REGION" ]; then
+            echo "::error::aws-region is required when push is true"; exit 1
+          fi
+
+      - name: Configure AWS credentials (OIDC)
+        if: inputs.push && inputs.aws-role-arn != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.aws-role-arn }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Configure AWS credentials (access keys)
+        if: inputs.push && inputs.aws-role-arn == ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.aws-access-key-id }}
+          aws-secret-access-key: ${{ secrets.aws-secret-access-key }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Login to Amazon ECR
+        if: inputs.push
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Image name and tag
+        id: meta
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REPOSITORY: ${{ inputs.ecr-repository }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+          CONTEXT: ${{ inputs.context }}
+        run: |
+          echo "image=${REGISTRY:+$REGISTRY/}${REPOSITORY}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "context=${CONTEXT:-$(dirname "$DOCKERFILE")}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ steps.meta.outputs.context }}
+          file: ${{ inputs.dockerfile }}
+          push: ${{ inputs.push }}
+          tags: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
